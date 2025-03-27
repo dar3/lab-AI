@@ -38,5 +38,5 @@ def load_graph(csv_path):
 
 
 # Przykładowe użycie
-graph = load_graph("connection_graph.csv")
+graph = load_graph("../connection_graph.csv")
 

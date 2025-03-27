@@ -1,7 +1,7 @@
 import heapq
 from datetime import datetime, timedelta
 
-from data_parser import graph
+from list1.data_parser import graph
 
 TRANSFER_TIME = timedelta(hours=0, minutes=1, seconds=0)
 
