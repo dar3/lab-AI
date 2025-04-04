@@ -443,14 +443,14 @@ def get_data():
         return start_stop, end_stop, time_or_stops, time
 
 def main():
-    graph_filename = "graph_data.pickle"
+    graph_filename = "_graph_data.pickle"
     try:
 
         graph = load_graph(graph_filename)
         print("Graph loaded successfully from file.")
     except FileNotFoundError:
 
-        graph = create_graph("../connection_graph.csv")
+        graph = create_graph("connection_graph.csv")
 
         save_graph(graph, graph_filename)
         print("Graph created and saved to file.")

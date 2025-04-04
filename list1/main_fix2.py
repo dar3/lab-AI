@@ -74,7 +74,6 @@ class Node:
     def edge_time_cost(edg: EdgeInformation):
         return edg.arrival_time.minAfterOO - edg.departure_time.minAfterOO
 
-
 def create_graph(filename: str):
     graph: dict[str, Node] = {}
 
@@ -85,6 +84,7 @@ def create_graph(filename: str):
     df.sort_values(['line', 'departure_time', 'start_stop'])
 
     nodes_created = 0
+    nodes_count = 0
     print("Creating nodes")
     for index, row in df.iterrows():
         ride_info = EdgeInformation(
@@ -110,15 +110,18 @@ def create_graph(filename: str):
         if row['start_stop'] not in graph:
             graph[row['start_stop']] = Node(start_info)
             nodes_created += 1
+            print(".", end='')
 
         if row['end_stop'] not in graph:
             graph[row['end_stop']] = Node(stop_info)
             nodes_created += 1
+            print(".", end='')
 
         graph[row['start_stop']].set_neighbour(ride_info)
 
-        if nodes_created % 100 == 0:
-            print(f"{nodes_created} nodes created", end='\r')
+        if nodes_created % 100 == 0 and nodes_created > nodes_count:
+            print(f"{nodes_created} nodes created")
+        nodes_count = nodes_created
 
     print(f"\n{nodes_created} nodes created totally")
     return graph
@@ -192,7 +195,7 @@ def cost_fun_for_time(current_node: Node, next_node: Node, current_time: TimeInf
 
 
 def cost_fun_for_switch(current_node: Node, next_node: Node, current_time: TimeInformation, prev_line: str):
-    """Cost function for transfer minimization"""
+    """Cost function that strongly prefers direct connections"""
     min_cost = float('inf')
     best_edge = None
 
@@ -205,9 +208,22 @@ def cost_fun_for_switch(current_node: Node, next_node: Node, current_time: TimeI
         if wait_time < 0:
             wait_time += 24 * 60
 
-        # Add penalty for line change
-        transfer_penalty = 1000 if edge.line != prev_line and prev_line else 0
-        total_cost = wait_time + transfer_penalty
+        # Check if this is a transfer
+        is_transfer = prev_line and edge.line != prev_line
+
+        # Base cost components
+        base_cost = wait_time * 0.1  # Small penalty for waiting
+
+        # Massive penalty for transfers (10000 per transfer)
+        transfer_penalty = 10000 if is_transfer else 0
+        # transfer_penalty = 999999999 if is_transfer else 0
+
+        # Additional bonus for routes that go directly to final destination
+        final_destination_bonus = 0
+        if edge.end_stop == end_stop_name:
+            final_destination_bonus = -5000
+
+        total_cost = base_cost + transfer_penalty + final_destination_bonus
 
         if total_cost < min_cost:
             min_cost = total_cost
@@ -217,7 +233,7 @@ def cost_fun_for_switch(current_node: Node, next_node: Node, current_time: TimeI
 
 
 def cost_fun_for_switch_modified(current_node: Node, next_node: Node, current_time: TimeInformation, prev_line: str):
-    """Modified cost function for transfer minimization with distance consideration"""
+    """Modified version that considers distance and direct connections"""
     min_cost = float('inf')
     best_edge = None
 
@@ -225,19 +241,23 @@ def cost_fun_for_switch_modified(current_node: Node, next_node: Node, current_ti
         if edge.end_stop != next_node.geo_info.name:
             continue
 
-        # Calculate waiting time
         wait_time = edge.departure_time.minAfterOO - current_time.minAfterOO
         if wait_time < 0:
             wait_time += 24 * 60
 
-        # Calculate transfer penalty based on distance
-        if edge.line != prev_line and prev_line:
-            distance = h(current_node, next_node)
-            transfer_penalty = 100 * distance  # Dynamic penalty based on distance
-        else:
-            transfer_penalty = 0
+        is_transfer = prev_line and edge.line != prev_line
 
-        total_cost = wait_time + transfer_penalty
+        # Distance-based components
+        distance = h(current_node, next_node)
+        distance_cost = distance * 0.01  # Small distance penalty
+
+        # Transfer penalty scales with distance
+        transfer_penalty = 5000 * distance if is_transfer else 0
+
+        # Bonus for direct connections to final destination
+        final_dest_bonus = -2000 * distance if edge.end_stop == end_stop_name else 0
+
+        total_cost = (wait_time * 0.1) + distance_cost + transfer_penalty + final_dest_bonus
 
         if total_cost < min_cost:
             min_cost = total_cost
@@ -250,6 +270,7 @@ def h(curr: Node, goal: Node):
     """Heuristic function - Euclidean distance"""
     return math.sqrt((curr.geo_info.latitiude - goal.geo_info.latitiude) ** 2 +
                      (curr.geo_info.longitude - goal.geo_info.longitude) ** 2)
+    return 0
 
 
 @timeit
@@ -273,7 +294,7 @@ def astar_search(graph, start, goal, cost_fn, start_time_str):
     open_set = []
     heapq.heappush(open_set, (start_node.f, start))
 
-    visited = set()
+    # visited = set()
 
     while open_set:
         current_f, current_name = heapq.heappop(open_set)
@@ -282,9 +303,9 @@ def astar_search(graph, start, goal, cost_fn, start_time_str):
         if current_name == goal:
             return graph
 
-        if current_name in visited:
-            continue
-        visited.add(current_name)
+        # if current_name in visited:
+        #     continue
+        # visited.add(current_name)
 
         # Get current time based on how we reached this node
         if current_node.parent_edge is None:
@@ -333,7 +354,7 @@ def dijkstra(graph, start, goal, cost_fn, start_time_str):
     open_set = []
     heapq.heappush(open_set, (start_node.g, start))
 
-    visited = set()
+    # visited = set()
 
     while open_set:
         current_g, current_name = heapq.heappop(open_set)
@@ -342,9 +363,9 @@ def dijkstra(graph, start, goal, cost_fn, start_time_str):
         if current_name == goal:
             return graph
 
-        if current_name in visited:
-            continue
-        visited.add(current_name)
+        # if current_name in visited:
+        #     continue
+        # visited.add(current_name)
 
         # Get current time based on how we reached this node
         if current_node.parent_edge is None:
@@ -424,7 +445,7 @@ def path_with_information(path: list[Node], start_time_str: str):
             # Print segment information
             print(f"Line {edge.line}:")
             print(f"  Board at {edge.start_stop} at {edge.departure_time}")
-            print(f"  Alight at {edge.end_stop} at {edge.arrival_time}")
+            print(f"  Get off at {edge.end_stop} at {edge.arrival_time}")
             print(f"  Travel time: {travel_time} minutes")
             if wait_time > 0:
                 print(f"  Wait time: {wait_time} minutes")
@@ -445,7 +466,7 @@ def path_with_information(path: list[Node], start_time_str: str):
 
         print("\nSummary:")
         print(f"Total journey time: {total_time} minutes")
-        print(f"Number of transfers: {num_changes}")
+        print(f"Ilość przesiadek: {num_changes}")
         print(f"Total cost: {path[-1].g}", file=sys.stderr)
 
     except AttributeError as e:
@@ -464,72 +485,111 @@ def load_graph(filename):
 
 
 def get_user_input():
-    print("Public Transport Route Finder")
-    start = input("Enter starting stop: ").strip()
-    end = input("Enter destination stop: ").strip()
-    departure_time = input("Enter departure time (HH:MM:SS): ").strip()
+    # start, end, criterion, departure_time = "Renoma", "PORT LOTNICZY", "t", "16:48:00"
+    start, end, criterion, departure_time = "Renoma", "PORT LOTNICZY", "t", "10:00:00"
+    print("Wyszukiwanie trasy")
+    return start, end, criterion, departure_time
+    start = input("Przystanek początkowy: ").strip()
+    end = input("Przystanek końcowy: ").strip()
+    departure_time = input("Godzina odjazdu HH:MM:SS : ").strip()
     while True:
-        criterion = input("Optimize for (t)ime or (p) transfers? ").strip().lower()
+        criterion = input("t - minimalizacja czasu dojazdu, p - minimalizacja liczby przesiadek: ").strip().lower()
         if criterion in ['t', 'p']:
             break
-        print("Please enter 't' for time or 'p' for transfers")
+        print("Proszę podać 't' dla czasu lub 'p' dla przesiadek")
     return start, end, criterion, departure_time
 
 
-def main():
-    GRAPH_FILE = "_graph_data.pickle"
 
+# Global variable for destination stop name
+end_stop_name = ""
+
+
+def main():
+    global end_stop_name
+
+    GRAPH_FILE = "graph_data.pickle"
+
+    # Try to load existing graph
     try:
         graph = load_graph(GRAPH_FILE)
-        print("Graph loaded from file.")
-    except (FileNotFoundError, EOFError):
-        print("Creating new graph...")
-        graph = create_graph("connection_graph.csv")
-        save_graph(graph, GRAPH_FILE)
-        print("Graph created and saved.")
+        print("Graph loaded successfully from file.")
+    except (FileNotFoundError, EOFError, pickle.UnpicklingError):
+        print("Creating new graph from CSV file...")
+        try:
+            graph = create_graph("connection_graph.csv")
+            save_graph(graph, GRAPH_FILE)
+            print("Graph created and saved to file.")
+        except Exception as e:
+            print(f"Error creating graph: {e}", file=sys.stderr)
+            return
 
+    # Get user input
     start, end, criterion, departure_time = get_user_input()
+    end_stop_name = end  # Set the global destination
 
     # Verify stops exist in graph
     if start not in graph:
-        print(f"Error: Starting stop '{start}' not found.", file=sys.stderr)
+        print(f"Error: Starting stop '{start}' not found in graph.", file=sys.stderr)
         return
     if end not in graph:
-        print(f"Error: Destination stop '{end}' not found.", file=sys.stderr)
+        print(f"Error: Destination stop '{end}' not found in graph.", file=sys.stderr)
         return
 
+    print(f"\nSearching route from {start} to {end} at {departure_time}")
+
     if criterion == 't':
-        print("\n=== Dijkstra (time) ===")
+        # Time optimization
+        print("\n=== Dijkstra Algorithm (Time Optimization) ===")
+        time_start = time.perf_counter()
         result = dijkstra(graph, start, end, cost_fun_for_time, departure_time)
+        time_end = time.perf_counter()
+
         if result:
             path = read_path(result, end)
             path_with_information(path, departure_time)
+            print(f"Algorithm execution time: {(time_end - time_start):.4f}s", file=sys.stderr)
         else:
-            print("No path found.")
+            print("No path found with Dijkstra")
 
-        print("\n=== A* (time) ===")
+        print("\n=== A* Algorithm (Time Optimization) ===")
+        time_start = time.perf_counter()
         result = astar_search(graph, start, end, cost_fun_for_time, departure_time)
-        if result:
-            path = read_path(result, end)
-            path_with_information(path, departure_time)
-        else:
-            print("No path found.")
-    else:
-        print("\n=== A* (transfers) ===")
-        result = astar_search(graph, start, end, cost_fun_for_switch, departure_time)
-        if result:
-            path = read_path(result, end)
-            path_with_information(path, departure_time)
-        else:
-            print("No path found.")
+        time_end = time.perf_counter()
 
-        print("\n=== Modified A* (transfers) ===")
-        result = astar_search(graph, start, end, cost_fun_for_switch_modified, departure_time)
         if result:
             path = read_path(result, end)
             path_with_information(path, departure_time)
+            print(f"Algorithm execution time: {(time_end - time_start):.4f}s", file=sys.stderr)
         else:
-            print("No path found.")
+            print("No path found with A*")
+
+    else:
+        # Transfer optimization
+        print("\n=== A* Algorithm (Transfer Optimization) ===")
+        time_start = time.perf_counter()
+        result = astar_search(graph, start, end, cost_fun_for_switch, departure_time)
+        time_end = time.perf_counter()
+
+        if result:
+            path = read_path(result, end)
+            path_with_information(path, departure_time)
+            print(f"Algorithm execution time: {(time_end - time_start):.4f}s", file=sys.stderr)
+        else:
+            print("No path found with A* (Transfer Optimization)")
+
+        print("\n=== Modified A* Algorithm (Smart Transfer Optimization) ===")
+        time_start = time.perf_counter()
+        result = astar_search(graph, start, end, cost_fun_for_switch_modified, departure_time)
+        time_end = time.perf_counter()
+
+        if result:
+            path = read_path(result, end)
+            path_with_information(path, departure_time)
+            print(f"Algorithm execution time: {(time_end - time_start):.4f}s", file=sys.stderr)
+        else:
+            print("No path found with Modified A*")
+
 
 
 if __name__ == "__main__":
